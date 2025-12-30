@@ -1,0 +1,7 @@
+{
+  "name": "@symmelove/ai",
+  "private": true,
+  "scripts": {
+    "dev": "echo AI not ready"
+  }
+}

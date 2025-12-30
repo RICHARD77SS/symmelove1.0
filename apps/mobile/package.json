@@ -1,0 +1,7 @@
+{
+  "name": "@symmelove/mobile",
+  "private": true,
+  "scripts": {
+    "dev": "echo MOBILE not ready"
+  }
+}

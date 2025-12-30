@@ -1,0 +1,8 @@
+{
+  "name": "@symmelove/web",
+  "private": true,
+  "scripts": {
+    "dev": "echo WEB not ready",
+    "build": "echo build web"
+  }
+}

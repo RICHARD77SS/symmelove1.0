@@ -1,0 +1,67 @@
+# ==========================================
+# DEPENDÊNCIAS (Node.js)
+# ==========================================
+node_modules/
+jspm_packages/
+package-lock.json
+# Nota: Alguns preferem subir o lock file, mas em monorepos 
+# grandes ele pode causar conflitos se não for gerenciado pelo PNPM/Yarn.
+# Se estiver usando npm, remova a linha acima.
+
+# ==========================================
+# COMPILAÇÃO / BUILD
+# ==========================================
+dist/
+build/
+*.tsbuildinfo
+
+# ==========================================
+# SEGREDOS E CONFIGURAÇÕES LOCAIS (CRÍTICO)
+# ==========================================
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.pem
+*.key
+.well-known/
+
+# ==========================================
+# PRISMA (ORM)
+# ==========================================
+# Não ignore o schema.prisma, mas ignore o banco local se usar SQLite
+/prisma/*.db
+/prisma/*.db-journal
+
+# ==========================================
+# LOGS
+# ==========================================
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# ==========================================
+# SISTEMA OPERACIONAL
+# ==========================================
+.DS_Store
+Thumbs.db
+.cache/
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# ==========================================
+# TESTES E COBERTURA
+# ==========================================
+/coverage
+/.nyc_output
+
+# ==========================================
+# DOCKER (Opcional)
+# ==========================================
+.docker-compose.override.yml
