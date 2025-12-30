@@ -1,0 +1,186 @@
+// =====================================
+// PRISMA CLIENT
+// =====================================
+// Responsável por gerar o client tipado
+// usado em toda a aplicação NestJS
+generator client {
+  provider = "prisma-client-js"
+}
+
+// =====================================
+// DATABASE
+// =====================================
+// PostgreSQL é escolhido por:
+// - Escala
+// - JSONB
+// - Índices avançados
+// - Consistência forte
+datasource db {
+  provider = "postgresql"
+}
+
+// =====================================
+// ENUMS GLOBAIS
+// =====================================
+
+// Status da verificação do usuário
+// (facial, corporal, identidade)
+enum VerificationStatus {
+  NONE        // Nunca iniciou verificação
+  PENDING     // Enviado, aguardando análise
+  VERIFIED    // Verificado com sucesso
+  REJECTED    // Reprovado
+}
+
+// Tipo de autenticação usada
+enum AuthType {
+  EMAIL
+  GOOGLE
+  PHONE
+}
+
+// Prioridade que o usuário dá
+// para compatibilidade
+enum ProfilePriority {
+  APPEARANCE      // Aparência é mais importante
+  PERSONALITY     // Personalidade é mais importante
+  BALANCED        // Peso equilibrado
+}
+
+// =====================================
+// USUÁRIO (IDENTIDADE GLOBAL)
+// =====================================
+// Representa a identidade do usuário no sistema
+// NÃO contém dados emocionais ou preferências
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  passwordHash String
+  createdAt DateTime @default(now())
+
+  // Status de verificação visual/identitária
+  verificationStatus VerificationStatus @default(NONE)
+
+  // Metadados da verificação
+  // Ex: hash facial, score, provider usado
+  // NUNCA imagens brutas
+  verificationMeta Json?
+
+  // Provedores de login (email, google, phone)
+  providers AuthProvider[]
+
+  // Perfil real do usuário (1:1)
+  profile Profile?
+
+  // Perfis desejados (1:N)
+  desiredProfiles DesiredProfile[]
+
+  @@map("users")
+}
+
+// =====================================
+// PROVEDORES DE AUTENTICAÇÃO
+// =====================================
+// Permite que o mesmo usuário tenha
+// múltiplos métodos de login
+model AuthProvider {
+  id          String   @id @default(uuid())
+  provider    AuthType
+  providerId  String
+  userId      String
+
+  user User @relation(fields: [userId], references: [id])
+
+  // Evita duplicação de contas
+  @@unique([provider, providerId])
+  @@index([userId])
+  @@map("auth_providers")
+}
+
+// =====================================
+// PERFIL REAL (QUEM O USUÁRIO É)
+// =====================================
+// Extremamente flexível via JSONB
+// Pode evoluir sem migrations frequentes
+model Profile {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+
+  // Dados principais
+  // Ex: idade, gênero, orientação, localização
+  core      Json
+
+  // Dados dinâmicos e expansíveis
+  // Ex: hobbies, valores, estilo de vida
+  attributes Json
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("profiles")
+}
+
+// =====================================
+// PERFIL DESEJADO (QUEM O USUÁRIO PROCURA)
+// =====================================
+// Um usuário pode ter ATÉ 10 perfis desejados
+// Cada um com pesos e prioridades diferentes
+model DesiredProfile {
+  id        String   @id @default(uuid())
+  userId    String
+
+  // Preferências desejadas
+  // Ex: altura mínima, hobbies, valores
+  preferences Json
+
+  // Pesos customizados por campo
+  // Ex: { "altura": 2, "valores": 5 }
+  weights Json?
+
+  // Prioridade geral do perfil
+  priority ProfilePriority @default(BALANCED)
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("desired_profiles")
+}
+
+// =====================================
+// MATCH / SIMETRIA
+// =====================================
+// Representa o resultado FINAL da IA
+// Compatibilidade bidirecional + média
+model Match {
+  id        String   @id @default(uuid())
+
+  // Usuário A
+  userAId   String
+
+  // Usuário B
+  userBId   String
+
+  // Compatibilidade:
+  // Perfil A -> Desejo B
+  scoreAtoB Float
+
+  // Compatibilidade:
+  // Perfil B -> Desejo A
+  scoreBtoA Float
+
+  // Média ponderada final
+  symmetry  Float
+
+  createdAt DateTime @default(now())
+
+  // Evita duplicar matches
+  @@unique([userAId, userBId])
+
+  // Otimiza ranking e buscas
+  @@index([symmetry])
+
+  @@map("matches")
+}

@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2021",
+    "module": "commonjs",
+
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+
+    "useDefineForClassFields": false,
+
+    "strict": true,
+    "skipLibCheck": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "types": ["jest", "node"]
+    
+  },
+  "include": ["src/**/*.spec.ts", "src/**/*.ts"],
+}
