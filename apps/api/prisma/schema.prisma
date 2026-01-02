@@ -60,6 +60,13 @@ model User {
 
   // Status de verificação visual/identitária
   verificationStatus VerificationStatus @default(NONE)
+ /**
+   * MFA (Multi-Factor Authentication)
+   * - mfaSecret: segredo TOTP (base32)
+   * - mfaEnabled: só fica true após verificação bem-sucedida
+   */
+  mfaSecret  String?  // Nullable por segurança (nem todo usuário tem MFA)
+  mfaEnabled Boolean  @default(false)
 
   // Metadados da verificação
   // Ex: hash facial, score, provider usado
