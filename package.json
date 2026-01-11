@@ -7,7 +7,13 @@
     "build": "turbo run build",
     "lint": "turbo run lint"
   },
+  "dependencies":{
+    "@prisma/client": "^7.2.0"
+
+  },
   "devDependencies": {
-    "turbo": "^2.7.0"
+    "dotenv-cli": "^11.0.0",
+    "turbo": "^2.7.0",
+    "prisma": "^7.2.0"
   }
 }

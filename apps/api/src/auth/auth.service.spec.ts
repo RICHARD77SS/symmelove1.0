@@ -1,62 +1,80 @@
-import { Test } from '@nestjs/testing';
+import { Test, TestingModule } from '@nestjs/testing';
+import { JwtService } from '@nestjs/jwt';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuthService } from './auth.service';
 import { PrismaService } from '../infra/prisma/prisma.service';
-import { JwtService } from '@nestjs/jwt';
+import { CacheService } from '../infra/cache/cache.service';
 
 describe('AuthService', () => {
   let service: AuthService;
   let prisma: PrismaService;
 
+  // Criamos Mocks para as dependências que não queremos testar diretamente agora
+  const mockPrisma: any = {
+    user: {
+      findUnique: jest.fn(),
+      create: jest.fn(),
+      upsert: jest.fn(),
+    },
+    authProvider: {
+      findUnique: jest.fn(),
+      create: jest.fn(),
+    },
+    $transaction: jest.fn((callback) => callback(mockPrisma)),
+  };
+
+  const mockCache = {
+    get: jest.fn(),
+    set: jest.fn(),
+    del: jest.fn(),
+    deleteByPattern: jest.fn(),
+  };
+
+  const mockJwt = {
+    signAsync: jest.fn().mockResolvedValue('fake_token'),
+    verifyAsync: jest.fn(),
+    decode: jest.fn(),
+  };
+
+  const mockEventEmitter = {
+    emit: jest.fn(),
+  };
+
   beforeEach(async () => {
-    const module = await Test.createTestingModule({
+    const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
-        {
-          provide: PrismaService,
-          useValue: {
-            user: {
-              findUnique: jest.fn().mockResolvedValue(null),
-              create: jest.fn(),
-            },
-            authProvider: {
-              create: jest.fn(),
-            },
-            $transaction: jest.fn((cb) =>
-              cb({
-                user: {
-                  create: jest.fn().mockResolvedValue({
-                    id: 'uuid',
-                    email: 'test@email.com',
-                    createdAt: new Date(),
-                  }),
-                },
-                authProvider: {
-                  create: jest.fn(),
-                },
-              }),
-            ),
-          },
-        },
-        {
-          provide: JwtService,
-          useValue: {
-            signAsync: jest.fn().mockResolvedValue('fake-jwt'),
-          },
-        },
+        // Fornecemos os Mocks em vez das classes reais
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: CacheService, useValue: mockCache },
+        { provide: JwtService, useValue: mockJwt },
+        { provide: EventEmitter2, useValue: mockEventEmitter }, // 👈 Resolva o erro aqui
       ],
     }).compile();
 
-    service = module.get(AuthService);
-    prisma = module.get(PrismaService);
+    service = module.get<AuthService>(AuthService);
+    prisma = module.get<PrismaService>(PrismaService);
   });
 
-  it('should hash password and create user', async () => {
-    const result = await service.registerWithEmail({
-      email: 'test@email.com',
-      password: 'Strong@Password123',
-    });
+  it('deve estar definido', () => {
+    expect(service).toBeDefined();
+  });
 
-    expect(result).toHaveProperty('accessToken');
-    expect(result.accessToken).toBe('fake-jwt');
+  /**
+   * Teste de Registro: Garante que a transação do Prisma é chamada
+   */
+  describe('registerWithEmail', () => {
+    it('deve criar um usuário e um provedor de auth com sucesso', async () => {
+      const dto = { email: 'richard@test.com', password: 'password123' };
+      
+      mockPrisma.authProvider.findUnique.mockResolvedValue(null);
+      mockPrisma.user.create.mockResolvedValue({ id: 'user_123', email: dto.email });
+
+      const result = await service.registerWithEmail(dto);
+
+      expect(result).toHaveProperty('accessToken');
+      expect(mockPrisma.user.create).toHaveBeenCalled();
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith('user.registered', expect.any(Object));
+    });
   });
 });

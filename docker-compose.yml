@@ -1,0 +1,69 @@
+version: '3.9'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+      - apps/api/.env
+    environment:
+      # Sobrescreve as URLs para o contexto interno do Docker
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/symmelove?schema=public
+      - JWT_ACCESS_SECRET=2379nyc4c5t6765tc1j7cy14ctt6cj3y8cr37ty56tc38y03t744rt6b7834rft68r523d7
+      - JWT_REFRESH_SECRET=6548h3gwt9y8f4t7326qwd9758j349f6o3d4rdfhyqwj783r4dyh3487wyr7834yr8374drj6y
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - NODE_OPTIONS=--enable-source-maps
+      - NODE_ENV=development
+      # Esta linha força o Node a não fazer buffer dos logs
+      - NODE_ICU_DATA=
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/apps/api/node_modules
+    # O comando abaixo garante: migração do Prisma -> geração do client -> início da app
+    command: >
+      sh -c "npx prisma migrate deploy --schema ./apps/api/prisma/schema.prisma --config ./apps/api/prisma.config.ts && 
+             npx prisma generate --schema ./apps/api/prisma/schema.prisma && 
+             pnpm run dev"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  db:
+    image: postgres:15
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: symmelove
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d symmelove"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:alpine
+    container_name: redis-server
+    restart: always
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:

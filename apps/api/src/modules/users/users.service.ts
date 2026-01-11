@@ -4,17 +4,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../infra/prisma/prisma.service';
+import { VerificationStatus } from '@prisma/client';
 
 /**
- * UsersService
- * --------------
- * Responsável por TODA a lógica de leitura e manipulação
- * de dados relacionados a usuários.
- *
- * ⚠️ Regras importantes:
- * - Nunca retornar senha
- * - Dados sensíveis só para usuários verificados
- * - Separar perfil público, privado e sensível
+ * UsersService (Enterprise Edition)
+ * ---------------------------------
+ * Camada de serviço ajustada para o Schema PostgreSQL com JSONB.
  */
 @Injectable()
 export class UsersService {
@@ -24,17 +19,21 @@ export class UsersService {
   // PERFIL COMPLETO DO USUÁRIO LOGADO (DONO)
   // =====================================================
   /**
-   * Retorna todas as informações do usuário autenticado.
-   * Usado em: /users/me
-   *
-   * O ID vem EXCLUSIVAMENTE do JWT (evita IDOR).
+   * Retorna a identidade e todos os perfis vinculados ao dono da conta.
+   * Inclui MFA status e metadados de verificação.
    */
   async getMyProfile(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
-        profile: true,
-        desiredProfile: true,
+        profile: true,         // Relação 1:1
+        desiredProfiles: true, // Relação 1:N
+        providers: {           // Lista métodos de login (Email, Google, etc)
+          select: {
+            provider: true,
+            providerId: true,
+          },
+        },
       },
     });
 
@@ -42,17 +41,16 @@ export class UsersService {
       throw new NotFoundException('Usuário não encontrado');
     }
 
-    /**
-     * Nunca retorne campos sensíveis diretamente.
-     * Caso existam no schema futuramente, use select.
-     */
+    // Mapeamento explícito para garantir que passwordHash e mfaSecret NUNCA vazem
     return {
       id: user.id,
       email: user.email,
-      role: user.role,
+      status: user.status,
       verificationStatus: user.verificationStatus,
+      mfaEnabled: user.mfaEnabled,
+      providers: user.providers,
       profile: user.profile,
-      desiredProfile: user.desiredProfile,
+      desiredProfiles: user.desiredProfiles,
       createdAt: user.createdAt,
     };
   }
@@ -61,16 +59,20 @@ export class UsersService {
   // PERFIL PÚBLICO (OUTROS USUÁRIOS)
   // =====================================================
   /**
-   * Retorna apenas dados públicos de um usuário.
-   * Usado em: /users/:id/public
-   *
-   * ⚠️ Nenhuma informação sensível é exposta aqui.
+   * Retorna apenas o necessário para exibição em buscas ou listas.
+   * Filtra o JSONB 'core' para expor apenas dados públicos.
    */
   async getPublicProfile(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      include: {
-        profile: true,
+      select: {
+        id: true,
+        verificationStatus: true,
+        profile: {
+          select: {
+            core: true, // Contém idade, gênero, localização via JSONB
+          },
+        },
       },
     });
 
@@ -80,42 +82,55 @@ export class UsersService {
 
     return {
       id: user.id,
-      profile: user.profile?.core ?? null,
       verificationStatus: user.verificationStatus,
+      // Retorna apenas a parte 'core' do perfil real
+      displayData: user.profile?.core ?? {},
     };
   }
 
   // =====================================================
-  // DADOS SENSÍVEIS (SOMENTE USUÁRIOS VERIFICADOS)
+  // DADOS SENSÍVEIS (USUÁRIOS VERIFICADOS)
   // =====================================================
   /**
-   * Retorna dados sensíveis SOMENTE se o usuário estiver verificado.
-   * Usado futuramente para recursos premium / privados.
+   * Acesso restrito a dados sensíveis (email, metadados de verificação).
+   * Exige que o perfil consultado tenha status 'VERIFIED'.
    */
   async getSensitiveProfile(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        verificationStatus: true,
+        verificationMeta: true, // Dados de score da IA/Verificação
+        createdAt: true,
+      }
     });
 
     if (!user) {
       throw new NotFoundException('Usuário não encontrado');
     }
 
-    if (user.verificationStatus !== 'VERIFIED') {
+    // Regra de Negócio: Bloqueio de acesso se o alvo não for verificado
+    if (user.verificationStatus !== VerificationStatus.VERIFIED) {
       throw new ForbiddenException(
-        'Usuário não verificado para acessar estes dados',
+        'Este perfil ainda não completou a verificação de identidade.',
       );
     }
 
-    /**
-     * Aqui você pode futuramente filtrar campos sensíveis:
-     * documentos, telefone, endereço, etc.
-     */
-    return {
-      id: user.id,
-      email: user.email,
-      verificationStatus: user.verificationStatus,
-      createdAt: user.createdAt,
-    };
+    return user;
+  }
+
+  // =====================================================
+  // GESTÃO DE STATUS (ADMIN/SISTEMA)
+  // =====================================================
+  /**
+   * Atualiza o status do usuário (Bloqueio, Ativação).
+   */
+  async updateUserStatus(userId: string, status: 'ACTIVE' | 'BANNED' | 'SUSPENDED') {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { status },
+    });
   }
 }

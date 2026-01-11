@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Logger,
   Param,
   Req,
   UseGuards,
@@ -10,7 +11,7 @@ import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { JwtRequest } from '../../auth/types/jwt-request.type';
-import { Roles } from '../../auth/decorator/roles.decorator';
+import { Roles } from '../../auth/decorators/roles.decorator';
 
 /**
  * UsersController
@@ -29,6 +30,7 @@ import { Roles } from '../../auth/decorator/roles.decorator';
  * Caso contrário → 401 Unauthorized
  */
 export class UsersController {
+  private readonly logger = new Logger(UsersController.name);
   constructor(private readonly usersService: UsersService) {}
 
   // =====================================================
@@ -41,9 +43,19 @@ export class UsersController {
    *
    * ✔️ Seguro contra IDOR
    */
-  @Get('me')
-  getMyProfile(@Req() req: JwtRequest) {
-    return this.usersService.getMyProfile(req.user.sub);
+@Get('me')
+  async getMe(@Req() req: any) {
+    // 🔍 O segredo está aqui: Verifique se o seu Strategy retorna 'userId' ou 'id'
+    // Se você seguiu o passo anterior da Strategy, o objeto está em req.user.userId
+    const userId = req.user.userId || req.user.id || req.user.sub;
+
+    this.logger.log(`Buscando perfil para o usuário ID: ${userId}`);
+
+    if (!userId) {
+      this.logger.error('ID do usuário não encontrado no request. Verifique a JwtStrategy.');
+    }
+
+    return this.usersService.getMyProfile(userId);
   }
 
   // =====================================================

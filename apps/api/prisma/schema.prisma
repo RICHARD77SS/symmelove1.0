@@ -5,6 +5,7 @@
 // usado em toda a aplicação NestJS
 generator client {
   provider = "prisma-client-js"
+  engineType = "binary"
 }
 
 // =====================================
@@ -18,6 +19,7 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
 
 // =====================================
 // ENUMS GLOBAIS
@@ -54,8 +56,8 @@ enum ProfilePriority {
 // NÃO contém dados emocionais ou preferências
 model User {
   id        String   @id @default(uuid())
-  email     String   @unique
-  passwordHash String
+  email     String ?  @unique
+  passwordHash String?
   createdAt DateTime @default(now())
 
   // Status de verificação visual/identitária
@@ -67,7 +69,7 @@ model User {
    */
   mfaSecret  String?  // Nullable por segurança (nem todo usuário tem MFA)
   mfaEnabled Boolean  @default(false)
-
+  status        String         @default("ACTIVE")
   // Metadados da verificação
   // Ex: hash facial, score, provider usado
   // NUNCA imagens brutas
@@ -93,7 +95,7 @@ model User {
 model AuthProvider {
   id          String   @id @default(uuid())
   provider    AuthType
-  providerId  String
+  providerId  String @unique // Aqui ficará o Email, ID do Google ou Telefone
   userId      String
 
   user User @relation(fields: [userId], references: [id])
