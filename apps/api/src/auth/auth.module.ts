@@ -12,6 +12,7 @@ import { MfaService } from './mfa.service';
 
 import { PrismaModule } from '../infra/prisma/prisma.module';
 import { InfraCacheModule } from '../infra/cache/cache.module';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
   imports: [
@@ -32,7 +33,7 @@ import { InfraCacheModule } from '../infra/cache/cache.module';
 
     // 🔹 Autenticação base
     PassportModule,
-
+    MailModule,
     // 🔹 JWT com SECRET via .env
     JwtModule.registerAsync({
   imports: [ConfigModule],

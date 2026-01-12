@@ -17,10 +17,11 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RequestOtpDto, VerifyOtpDto } from './dto/phone-login.dto';
 import { MfaService } from './mfa.service';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 /**
- * Controller de Autenticação
- * Centraliza Registro, Login, Refresh Token e MFA.
+ * Controller de Autenticação Centralizado
+ * Gerencia autenticação via Email, Google, Telefone, além de MFA e Recuperação.
  */
 @Controller('auth')
 @UseGuards(ThrottlerGuard) 
@@ -31,22 +32,24 @@ export class AuthController {
   ) {}
 
   /**
-   * 🛡️ HELPER DE EXTRAÇÃO DE IDENTIDADE
-   * Resolve o problema do 'undefined' no Prisma. Tenta capturar o ID 
-   * independente se a Strategy retornar 'userId', 'id' ou 'sub'.
+   * 🛡️ EXTRAÇÃO SEGURA DE ID
+   * Normaliza o acesso ao ID do usuário independente do payload do JWT.
    */
   private extractUserId(req: any): string {
     const userId = req.user?.userId || req.user?.id || req.user?.sub;
     
     if (!userId) {
       throw new UnauthorizedException(
-        'Falha na identificação do usuário. O token pode estar malformado.'
+        'Sessão inválida ou identificador não encontrado.'
       );
     }
     return userId;
   }
 
-  // --- REGISTRO ---
+  // =====================================================
+  // 1. REGISTRO E LOGIN TRADICIONAL (EMAIL)
+  // =====================================================
+
   @Post('register/email')
   @Throttle({ default: { limit: 3, ttl: 60000 } }) 
   @HttpCode(HttpStatus.CREATED)
@@ -54,7 +57,6 @@ export class AuthController {
     return this.authService.registerWithEmail(dto);
   }
 
-  // --- LOGIN ---
   @Post('login/email')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
@@ -62,19 +64,22 @@ export class AuthController {
     const metadata = {
       ip: req.ip || req.headers['x-forwarded-for']?.toString() || req.socket.remoteAddress,
       userAgent: req.headers['user-agent'] || 'unknown',
-      attemptedAt: new Date(),
+      attemptAt: new Date(),
     };
     return this.authService.loginWithEmail(dto, metadata);
   }
 
-  // --- RENOVAÇÃO DE SESSÃO ---
+  // =====================================================
+  // 2. GESTÃO DE SESSÃO (REFRESH E LOGOUT)
+  // =====================================================
+
   @Post('token/refresh')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async refresh(@Body() dto: RefreshTokenDto) {
     return this.authService.refreshTokens(dto.refreshToken);
   }
 
-  // --- LOGOUT ---
   @Post('logout')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
@@ -89,11 +94,13 @@ export class AuthController {
     return this.authService.logoutAll(this.extractUserId(req));
   }
 
-  // --- MULTI-FACTOR AUTHENTICATION (MFA) ---
+  // =====================================================
+  // 3. MULTI-FACTOR AUTHENTICATION (MFA)
+  // =====================================================
+
   @Post('mfa/setup')
   @UseGuards(JwtAuthGuard)
   async setupMfa(@Req() req: any) {
-    // Agora o ID nunca chegará undefined ao Prisma
     return this.mfaService.setupTotp(this.extractUserId(req));
   }
 
@@ -103,19 +110,43 @@ export class AuthController {
     return this.mfaService.verifyAndEnable(this.extractUserId(req), token);
   }
 
-  // --- LOGIN SOCIAL / TELEFONE ---
+  // =====================================================
+  // 4. MÉTODOS DE LOGIN ALTERNATIVOS (SMS/GOOGLE)
+  // =====================================================
+
   @Post('login/phone/request')
+  @Throttle({ default: { limit: 2, ttl: 60000 } })
   async requestOtp(@Body() dto: RequestOtpDto) {
     return this.authService.requestPhoneOtp(dto.phone);
   }
 
   @Post('login/phone/verify')
+  @HttpCode(HttpStatus.OK)
   async verifyOtp(@Body() dto: VerifyOtpDto) {
     return this.authService.verifyPhoneOtp(dto.phone, dto.code);
   }
 
   @Post('login/google')
+  @HttpCode(HttpStatus.OK)
   async loginGoogle(@Body('idToken') idToken: string) {
     return this.authService.loginWithGoogle(idToken);
+  }
+
+  // =====================================================
+  // 5. RECUPERAÇÃO DE SENHA
+  // =====================================================
+
+  @Post('password/forgot')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 2, ttl: 3600000 } }) // Máximo 2 envios por hora por IP
+  async forgotPassword(@Body('email') email: string) {
+    return this.authService.forgotPassword(email);
+  }
+
+  @Post('password/reset')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60000 } }) 
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto);
   }
 }
