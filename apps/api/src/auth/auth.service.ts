@@ -20,6 +20,8 @@ import { LoginEmailDto } from './dto/login-email.dto';
 import { AuthType } from '@prisma/client';
 import { MailService } from '../mail/mail.service';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 
 @Injectable()
 export class AuthService {
@@ -31,6 +33,8 @@ export class AuthService {
     private readonly eventEmitter: EventEmitter2,
     private readonly cacheService: CacheService,
     private readonly mailService: MailService,
+    @InjectQueue('mail_queue') private readonly mailQueue: Queue, // Injeção correta
+    @InjectQueue('sms_queue') private readonly smsQueue: Queue,
   ) {
     // Cliente oficial do Google para validar tokens OAuth2
     this.googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -40,44 +44,56 @@ export class AuthService {
   // 📌 POST /auth/register/email
   // REGISTRO DE USUÁRIO COM EMAIL E SENHA
   // =====================================================
-  async registerWithEmail(dto: RegisterEmailDto) {
-    const email = dto.email.toLowerCase().trim();
+ async registerWithEmail(dto: RegisterEmailDto) {
+  const email = dto.email.toLowerCase().trim();
 
-    const existing = await this.prisma.authProvider.findUnique({
-      where: { providerId: email },
-    });
+  // 1. Verificação (Síncrona - Bloqueante)
+  const existing = await this.prisma.authProvider.findUnique({
+    where: { providerId: email },
+  });
 
-    if (existing) {
-      throw new ConflictException('Este e-mail já está em uso.');
-    }
-
-    const passwordHash = await argon2.hash(dto.password);
-
-    const user = await this.prisma.$transaction(async (tx) => {
-      const newUser = await tx.user.create({
-        data: {
-          email,
-          passwordHash,
-          status: 'ACTIVE',
-        },
-      });
-
-      await tx.authProvider.create({
-        data: {
-          provider: AuthType.EMAIL,
-          providerId: email,
-          userId: newUser.id,
-        },
-      });
-
-      return newUser;
-    });
-
-    this.eventEmitter.emit('user.registered', { userId: user.id });
-
-    return this.createSession(user.id);
+  if (existing) {
+    throw new ConflictException('Este e-mail já está em uso.');
   }
 
+  const passwordHash = await argon2.hash(dto.password);
+
+  // 2. Persistência no Banco (Síncrona - Bloqueante)
+  const user = await this.prisma.$transaction(async (tx) => {
+    const newUser = await tx.user.create({
+      data: {
+        email,
+        passwordHash,
+        status: 'ACTIVE',
+      },
+    });
+
+    await tx.authProvider.create({
+      data: {
+        provider: AuthType.EMAIL,
+        providerId: email,
+        userId: newUser.id,
+      },
+    });
+
+    return newUser;
+  });
+
+  // 3. Tarefas em Background (Assíncronas - Não Bloqueantes)
+  // Em vez de esperar o e-mail ser enviado, apenas agendamos o job
+  await this.mailQueue.add('welcome-email', {
+    email: user.email,
+    userId: user.id,
+  }, {
+    attempts: 3,
+    backoff: 10000, // 10 segundos
+  });
+
+  this.eventEmitter.emit('user.registered', { userId: user.id });
+
+  // 4. Resposta Imediata
+  return this.createSession(user.id);
+}
   // =====================================================
   // 📌 POST /auth/login/email
   // LOGIN COM EMAIL + SENHA
@@ -173,23 +189,26 @@ export class AuthService {
   // 📌 POST /auth/phone/request-otp
   // SOLICITA OTP VIA SMS
   // =====================================================
-  async requestPhoneOtp(phone: string) {
-    const limitKey = `otp_limit:${phone}`;
-    const attempts = (await this.cacheService.get<number>(limitKey)) || 0;
+async requestPhoneOtp(phone: string) {
+  // 1. Verificação de Rate Limit (já existente no seu código)
+  const limitKey = `otp_limit:${phone}`;
+  const attempts = (await this.cacheService.get<number>(limitKey)) || 0;
+  if (attempts >= 3) throw new ForbiddenException('Muitas tentativas.');
 
-    if (attempts >= 3) {
-      throw new ForbiddenException('Muitas tentativas.');
-    }
+  // 2. Gerar OTP e Salvar no Cache
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  await this.cacheService.set(`otp:${phone}`, otp, 300); // 5 min
+  await this.cacheService.set(limitKey, attempts + 1, 3600); // Bloqueio por 1h
 
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  // 3. Adicionar à Fila do Twilio
+  await this.smsQueue.add('send-otp', { phone, otp }, {
+    attempts: 5, // Twilio pode falhar por oscilação de rede
+    backoff: { type: 'exponential', delay: 2000 },
+    removeOnComplete: true,
+  });
 
-    await this.cacheService.set(`otp:${phone}`, otp, 300);
-    await this.cacheService.set(limitKey, attempts + 1, 3600);
-
-    this.eventEmitter.emit('sms.send_otp', { phone, otp });
-
-    return { success: true };
-  }
+  return { success: true };
+}
 
   // =====================================================
   // 📌 POST /auth/phone/verify-otp
@@ -199,7 +218,7 @@ export class AuthService {
     const saved = await this.cacheService.get<string>(`otp:${phone}`);
 
     if (!saved || saved !== code) {
-      throw new UnauthorizedException('Código inválido.');
+      throw new UnauthorizedException('Código inválido ou expirado.');
     }
 
     const provider = await this.prisma.authProvider.findUnique({
@@ -284,22 +303,25 @@ export class AuthService {
   // RECUPERAÇÃO DE SENHA
   // =====================================================
   async forgotPassword(email: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { email },
-    });
-
-    if (!user) {
-      return { message: 'Se o e-mail existir, você receberá instruções.' };
-    }
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user) return { message: 'Se o e-mail existir, você receberá instruções.' };
 
     const token = this.jwtService.sign(
       { sub: user.id, type: 'password-reset' },
       { expiresIn: '15m' },
     );
 
-    await this.mailService.sendResetPasswordEmail(user.email, token);
+    // 🔥 EM VEZ DE: await this.mailService.sendResetPasswordEmail(...)
+    // NÓS FAZEMOS:
+    await this.mailQueue.add('reset-password', {
+      email: user.email,
+      token: token,
+    }, {
+      attempts: 3, // Se falhar (ex: servidor de email fora), tenta 3 vezes
+      backoff: 5000 // Espera 5 segundos entre tentativas
+    });
 
-    return { message: 'E-mail enviado com sucesso.' };
+    return { message: 'E-mail enviado com sucesso.' }; // Resposta instantânea!
   }
 
   // =====================================================

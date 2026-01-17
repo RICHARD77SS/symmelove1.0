@@ -1,88 +1,80 @@
 import {
   Controller,
   Get,
-  Logger,
-  Param,
+  Patch,
+  Delete,
+  Body,
   Req,
+  Param,
   UseGuards,
+  Logger,
 } from '@nestjs/common';
 
-import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
-import { JwtRequest } from '../../auth/types/jwt-request.type';
 import { Roles } from '../../auth/decorators/roles.decorator';
+import { UsersService } from './users.service';
+import { UpdateMeDto } from './dto/update-me.dto';
 
-/**
- * UsersController
- * ----------------
- * Camada responsável apenas por:
- * - Receber requisições
- * - Aplicar Guards
- * - Encaminhar para o Service
- *
- * ❌ Nunca colocar lógica de negócio aqui
- */
 @Controller('users')
-@UseGuards(JwtAuthGuard)
-/**
- * Todas as rotas deste controller exigem JWT válido.
- * Caso contrário → 401 Unauthorized
- */
+@UseGuards(JwtAuthGuard) // 🔐 Todas as rotas exigem login
 export class UsersController {
   private readonly logger = new Logger(UsersController.name);
+
   constructor(private readonly usersService: UsersService) {}
 
   // =====================================================
-  // PERFIL DO USUÁRIO LOGADO
-  // GET /users/me
+  // 1. GESTÃO DA PRÓPRIA CONTA (/me)
   // =====================================================
-  /**
-   * Retorna o perfil COMPLETO do usuário autenticado.
-   * O ID vem do token JWT (req.user.sub).
-   *
-   * ✔️ Seguro contra IDOR
-   */
-@Get('me')
+
+  @Get('me')
   async getMe(@Req() req: any) {
-    // 🔍 O segredo está aqui: Verifique se o seu Strategy retorna 'userId' ou 'id'
-    // Se você seguiu o passo anterior da Strategy, o objeto está em req.user.userId
     const userId = req.user.userId || req.user.id || req.user.sub;
+    this.logger.log(`[GET] Buscando perfil próprio: ${userId}`);
+    
+    // Chamando o método unificado getMe que já possui cache
+    return this.usersService.getMe(userId);
+  }
 
-    this.logger.log(`Buscando perfil para o usuário ID: ${userId}`);
+  @Patch('me')
+  async updateMe(@Req() req: any, @Body() dto: UpdateMeDto) {
+    const userId = req.user.userId || req.user.id || req.user.sub;
+    this.logger.log(`[PATCH] Atualizando perfil: ${userId}`);
+    
+    return this.usersService.updateMe(userId, dto);
+  }
 
-    if (!userId) {
-      this.logger.error('ID do usuário não encontrado no request. Verifique a JwtStrategy.');
-    }
-
-    return this.usersService.getMyProfile(userId);
+  @Delete('me')
+  async deleteMe(@Req() req: any) {
+    const userId = req.user.userId || req.user.id || req.user.sub;
+    this.logger.log(`[DELETE] Solicitada desativação de conta: ${userId}`);
+    
+    return this.usersService.deleteMe(userId);
   }
 
   // =====================================================
-  // PERFIL PÚBLICO DE OUTRO USUÁRIO
-  // GET /users/:id/public
+  // 2. INTERAÇÃO COM OUTROS USUÁRIOS
   // =====================================================
+
   /**
-   * Retorna informações públicas de um usuário.
-   * Pode ser usado para visualização de perfil.
+   * Retorna apenas dados públicos (Core) para exibição em cards/listas.
+   * Livre para qualquer usuário autenticado.
    */
   @Get(':id/public')
-  getPublicProfile(@Param('id') id: string) {
+  async getPublicProfile(@Param('id') id: string) {
+    this.logger.log(`[GET] Perfil público solicitado para ID: ${id}`);
     return this.usersService.getPublicProfile(id);
   }
 
-  // =====================================================
-  // DADOS SENSÍVEIS (ADMIN)
-  // GET /users/:id/sensitive
-  // =====================================================
   /**
-   * Apenas ADMIN pode acessar dados sensíveis de usuários.
-   * Além disso, o usuário alvo precisa estar VERIFICADO.
+   * Acesso a dados sensíveis (E-mail, metadados de verificação).
+   * Restrito a usuários com role ADMIN.
    */
   @Get(':id/sensitive')
   @UseGuards(RolesGuard)
   @Roles('ADMIN')
-  getSensitiveProfile(@Param('id') id: string) {
+  async getSensitiveProfile(@Param('id') id: string) {
+    this.logger.log(`[ADMIN] Acesso a dados sensíveis do ID: ${id}`);
     return this.usersService.getSensitiveProfile(id);
   }
 }

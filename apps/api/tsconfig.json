@@ -12,8 +12,9 @@
     "skipLibCheck": true,
     "sourceMap": true,
     "outDir": "./dist",
-    "types": ["jest", "node"]
-    
+    "types": ["jest", "node"],
+    "esModuleInterop": true,
+"allowSyntheticDefaultImports": true
   },
   "include": ["src/**/*.spec.ts", "src/**/*.ts"],
 }

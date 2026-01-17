@@ -1,70 +1,76 @@
 // apps/api/src/infra/cache/cache.service.ts
 
-import { Injectable, Inject} from '@nestjs/common';
+import { Injectable, Inject, Logger } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 
-/**
- * CacheService (Redis Wrapper)
- * Responsável por gerenciar sessões e dados temporários de alta performance.
- * Essencial para escalabilidade horizontal.
- */
 @Injectable()
 export class CacheService {
+  private readonly logger = new Logger(CacheService.name);
+
   constructor(
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {}
 
   /**
-   * Define um valor no cache (ex: salvar ID da sessão do Refresh Token)
-   * @param key Chave única (ex: session:user_id:jti)
-   * @param value Valor a ser guardado
-   * @param ttl Tempo de vida em segundos (padrão: 7 dias)
+   * Define um valor no cache. 
+   * Nota: O JSON.stringify garante que o dado seja recuperável de forma idêntica por qualquer nó da API.
    */
-  async set(key: string, value: any, ttl: number = 60 * 60 * 24 * 7): Promise<void> {
-    // No cache-manager v5+, o TTL é passado em milissegundos
-    await this.cacheManager.set(key, value, ttl * 1000);
+  async set(key: string, value: any, ttlInSeconds = 60 * 60 * 24 * 7): Promise<void> {
+    try {
+      // Algumas stores do cache-manager usam segundos, outras milissegundos. 
+      // Verifique se o seu RedisStore pede milissegundos.
+      await this.cacheManager.set(key, JSON.stringify(value), ttlInSeconds * 1000);
+    } catch (error) {
+      this.logger.error(`Erro ao gravar no Cache: ${key}`, error);
+    }
   }
 
   /**
-   * Recupera um valor do cache
+   * Recupera um valor do cache com tipagem genérica.
    */
   async get<T>(key: string): Promise<T | undefined> {
-    return await this.cacheManager.get<T>(key);
+    try {
+      const data = await this.cacheManager.get<string>(key);
+      if (!data) return undefined;
+
+      // Se o dado já for um objeto (algumas stores parseiam sozinhas), retorna ele
+      if (typeof data !== 'string') return data as T;
+
+      return JSON.parse(data) as T;
+    } catch (error) {
+      this.logger.error(`Erro ao ler do Cache: ${key}`, error);
+      return undefined;
+    }
   }
 
-  /**
-   * Remove um item (ex: Logout)
-   */
   async del(key: string): Promise<void> {
     await this.cacheManager.del(key);
   }
 
-  /**
-   * Verifica se uma chave existe
-   */
   async exists(key: string): Promise<boolean> {
-    const value = await this.get(key);
+    const value = await this.cacheManager.get(key);
     return value !== undefined && value !== null;
   }
-/**
- * Remove múltiplas chaves baseadas em um padrão (Pattern).
- * Muito útil para "Logout All".
- */
-async deleteByPattern(pattern: string): Promise<void> {
-  // Support cache-manager v7 ('stores') and legacy 'store' by using an any-cast
-  const anyCache: any = this.cacheManager as any;
-  const store = anyCache.store ?? anyCache.stores ?? anyCache;
 
-  // Se estiver usando Redis, acessamos o cliente diretamente para usar 'KEYS' ou 'SCAN'
-  // Nota: SCAN é preferível a KEYS em bancos de dados gigantes para não travar o Redis.
-  if (store && ('keys' in store || typeof (store as any).keys === 'function')) {
-    const keys = await (store as any).keys(pattern);
-    if (Array.isArray(keys) && keys.length > 0) {
-      for (const key of keys) {
-        await this.cacheManager.del(key);
+  /**
+   * Limpa cache por padrão (ex: user:me:*)
+   * Implementação segura para diferentes tipos de store.
+   */
+  async deleteByPattern(pattern: string): Promise<void> {
+    try {
+      const store = (this.cacheManager as any).store;
+      
+      // Verifica se a store suporta busca por chaves (comum no Redis)
+      if (store && typeof store.keys === 'function') {
+        const keys: string[] = await store.keys(pattern);
+        if (keys.length > 0) {
+          await Promise.all(keys.map(key => this.cacheManager.del(key)));
+          this.logger.debug(`Cache invalidado para o padrão: ${pattern} (${keys.length} chaves)`);
+        }
       }
+    } catch (error) {
+      this.logger.error(`Erro ao deletar padrão de cache: ${pattern}`, error);
     }
   }
-}
 }

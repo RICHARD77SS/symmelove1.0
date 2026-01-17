@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    .button { background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; }
+    .footer { font-size: 12px; color: #6b7280; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <h1>Olá, {{ name }}!</h1>
+  <p>Bem-vindo ao nosso sistema. Estamos felizes em ter você conosco.</p>
+  <p>Para começar, acesse seu painel agora mesmo:</p>
+  <a href="{{ url }}" class="button">Acessar Painel</a>
+  
+  <div class="footer">
+    Este e-mail foi enviado para {{ email }}.
+  </div>
+</body>
+</html>

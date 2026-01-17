@@ -13,6 +13,9 @@ import { MfaService } from './mfa.service';
 import { PrismaModule } from '../infra/prisma/prisma.module';
 import { InfraCacheModule } from '../infra/cache/cache.module';
 import { MailModule } from '../mail/mail.module';
+import { BullModule } from '@nestjs/bullmq';
+import { SmsProcessor } from './processors/sms.processor';
+import { SmsService } from '../infra/sms/sms.service';
 
 @Module({
   imports: [
@@ -34,6 +37,14 @@ import { MailModule } from '../mail/mail.module';
     // 🔹 Autenticação base
     PassportModule,
     MailModule,
+    // Fila de e-mails
+    BullModule.registerQueue({
+      name: 'mail_queue',
+    }),
+    // 🔴 Fila de SMS (FALTAVA ESSA)
+    BullModule.registerQueue({
+      name: 'sms_queue',
+    }),
     // 🔹 JWT com SECRET via .env
     JwtModule.registerAsync({
   imports: [ConfigModule],
@@ -63,8 +74,9 @@ import { MailModule } from '../mail/mail.module';
     AuthService,
     JwtStrategy,
     MfaService,
+    SmsService, SmsProcessor
   ],
 
-  exports: [AuthService],
+  exports: [AuthService,BullModule],
 })
 export class AuthModule {}

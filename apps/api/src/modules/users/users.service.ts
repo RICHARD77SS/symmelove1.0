@@ -4,31 +4,35 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../infra/prisma/prisma.service';
-import { VerificationStatus } from '@prisma/client';
+import { CacheService } from '../../infra/cache/cache.service';
+import { VerificationStatus } from '@prisma/client'; // UserStatus removido pois não existe no schema
+import { UpdateMeDto } from './dto/update-me.dto';
 
-/**
- * UsersService (Enterprise Edition)
- * ---------------------------------
- * Camada de serviço ajustada para o Schema PostgreSQL com JSONB.
- */
+// Criamos o tipo manualmente para garantir consistência no código
+export type UserStatus = 'ACTIVE' | 'BANNED' | 'SUSPENDED' | 'DELETED';
+
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cacheService: CacheService,
+  ) {}
 
   // =====================================================
-  // PERFIL COMPLETO DO USUÁRIO LOGADO (DONO)
+  // 1. MEU PERFIL (USUÁRIO LOGADO) - COM CACHE
   // =====================================================
-  /**
-   * Retorna a identidade e todos os perfis vinculados ao dono da conta.
-   * Inclui MFA status e metadados de verificação.
-   */
-  async getMyProfile(userId: string) {
+  async getMe(userId: string) {
+    const cacheKey = `user:me:${userId}`;
+
+    const cached = await this.cacheService.get(cacheKey);
+    if (cached) return cached;
+
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
-        profile: true,         // Relação 1:1
-        desiredProfiles: true, // Relação 1:N
-        providers: {           // Lista métodos de login (Email, Google, etc)
+        profile: true,
+        desiredProfiles: true,
+        providers: {
           select: {
             provider: true,
             providerId: true,
@@ -41,11 +45,10 @@ export class UsersService {
       throw new NotFoundException('Usuário não encontrado');
     }
 
-    // Mapeamento explícito para garantir que passwordHash e mfaSecret NUNCA vazem
-    return {
+    const response = {
       id: user.id,
       email: user.email,
-      status: user.status,
+      status: user.status as UserStatus, // Fazemos o cast para o nosso tipo
       verificationStatus: user.verificationStatus,
       mfaEnabled: user.mfaEnabled,
       providers: user.providers,
@@ -53,48 +56,86 @@ export class UsersService {
       desiredProfiles: user.desiredProfiles,
       createdAt: user.createdAt,
     };
+
+    await this.cacheService.set(cacheKey, response, 300);
+    return response;
   }
 
   // =====================================================
-  // PERFIL PÚBLICO (OUTROS USUÁRIOS)
+  // 2. ATUALIZAÇÃO DE PERFIL (DEEP MERGE)
   // =====================================================
-  /**
-   * Retorna apenas o necessário para exibição em buscas ou listas.
-   * Filtra o JSONB 'core' para expor apenas dados públicos.
-   */
+async updateMe(userId: string, dto: UpdateMeDto) {
+  const profile = await this.prisma.profile.findUnique({
+    where: { userId },
+  });
+
+  // 1️⃣ Convertemos as instâncias do DTO em objetos literais puros
+  // O spread operator {...dto.core} transforma a instância da classe em um Object
+  const coreData = dto.core ? { ...dto.core } : undefined;
+  const attributesData = dto.attributes ? { ...dto.attributes } : undefined;
+
+  let updatedProfile;
+
+  if (!profile) {
+    updatedProfile = await this.prisma.profile.create({
+      data: {
+        userId,
+        core: coreData ?? {},
+        attributes: attributesData ?? {},
+      },
+    });
+  } else {
+    updatedProfile = await this.prisma.profile.update({
+      where: { userId },
+      data: {
+        core: coreData
+          ? { ...(profile.core as object), ...coreData }
+          : undefined,
+
+        attributes: attributesData
+          ? { ...(profile.attributes as object), ...attributesData }
+          : undefined,
+      },
+    });
+  }
+
+  await this.cacheService.del(`user:me:${userId}`);
+  return updatedProfile;
+}
+
+  // =====================================================
+  // 3. PERFIL PÚBLICO (FILTRADO)
+  // =====================================================
   async getPublicProfile(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
+        status: true,
         verificationStatus: true,
         profile: {
           select: {
-            core: true, // Contém idade, gênero, localização via JSONB
+            core: true,
           },
         },
       },
     });
 
-    if (!user) {
-      throw new NotFoundException('Usuário não encontrado');
+    // Segurança: Não mostra perfis deletados ou banidos na busca
+    if (!user || user.status !== 'ACTIVE') {
+      throw new NotFoundException('Usuário não disponível');
     }
 
     return {
       id: user.id,
       verificationStatus: user.verificationStatus,
-      // Retorna apenas a parte 'core' do perfil real
       displayData: user.profile?.core ?? {},
     };
   }
 
   // =====================================================
-  // DADOS SENSÍVEIS (USUÁRIOS VERIFICADOS)
+  // 4. DADOS SENSÍVEIS (PÓS-VERIFICAÇÃO)
   // =====================================================
-  /**
-   * Acesso restrito a dados sensíveis (email, metadados de verificação).
-   * Exige que o perfil consultado tenha status 'VERIFIED'.
-   */
   async getSensitiveProfile(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -102,16 +143,13 @@ export class UsersService {
         id: true,
         email: true,
         verificationStatus: true,
-        verificationMeta: true, // Dados de score da IA/Verificação
+        verificationMeta: true,
         createdAt: true,
-      }
+      },
     });
 
-    if (!user) {
-      throw new NotFoundException('Usuário não encontrado');
-    }
+    if (!user) throw new NotFoundException('Usuário não encontrado');
 
-    // Regra de Negócio: Bloqueio de acesso se o alvo não for verificado
     if (user.verificationStatus !== VerificationStatus.VERIFIED) {
       throw new ForbiddenException(
         'Este perfil ainda não completou a verificação de identidade.',
@@ -122,15 +160,25 @@ export class UsersService {
   }
 
   // =====================================================
-  // GESTÃO DE STATUS (ADMIN/SISTEMA)
+  // 5. GESTÃO DE CONTA (DESATIVAÇÃO / STATUS)
   // =====================================================
-  /**
-   * Atualiza o status do usuário (Bloqueio, Ativação).
-   */
-  async updateUserStatus(userId: string, status: 'ACTIVE' | 'BANNED' | 'SUSPENDED') {
-    return this.prisma.user.update({
+  async deleteMe(userId: string) {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { status: 'DELETED' },
+    });
+
+    await this.cacheService.del(`user:me:${userId}`);
+    return { message: 'Conta desativada com sucesso' };
+  }
+
+  async updateUserStatus(userId: string, status: UserStatus) {
+    const updated = await this.prisma.user.update({
       where: { id: userId },
       data: { status },
     });
+
+    await this.cacheService.del(`user:me:${userId}`);
+    return updated;
   }
 }

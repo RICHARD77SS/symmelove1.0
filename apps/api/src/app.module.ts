@@ -1,24 +1,24 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config'; // Adicione ConfigService
 import { ThrottlerModule } from '@nestjs/throttler';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { BullModule } from '@nestjs/bullmq';
 
-// Infra e Módulos
 import { PrismaModule } from './infra/prisma/prisma.module';
 import { UsersModule } from './modules/users/users.module';
 import { VerificationModule } from './modules/verification/verification.module';
 import { AuthModule } from './auth/auth.module';
 import authConfigProvider from './auth/auth.config.provider';
-
-// Importe o seu provider de configuração (ajuste o caminho se necessário)
+import { BullBoardModule } from '@bull-board/nestjs';
+import { ExpressAdapter } from '@bull-board/express';
+import { BullMQAdapter } from '@bull-board/api/bullMQAdapter'; // Importação correta
 
 @Module({
   imports: [
     // 🌍 Configuração Global
     ConfigModule.forRoot({ 
       isGlobal: true, 
-      load: [authConfigProvider], // 👈 CRUCIAL: Carrega o namespace 'auth'
-      // No Docker, os caminhos devem ser relativos à raiz do container (/app)
+      load: [authConfigProvider],
       envFilePath: ['.env', 'apps/api/.env'], 
     }),
     
@@ -30,6 +30,32 @@ import authConfigProvider from './auth/auth.config.provider';
     // 🗄️ Banco de Dados
     PrismaModule, 
 
+    // 🛡️ Redis & Filas (Configuração Global)
+    // Usamos useFactory para garantir que as variáveis de ambiente do ConfigModule estejam prontas
+    BullModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        connection: {
+          host: config.get('REDIS_HOST') || 'localhost',
+          port: config.get<number>('REDIS_PORT') || 6379,
+        },
+      }),
+    }),
+// 1. Painel principal
+    BullBoardModule.forRoot({
+      route: '/admin/queues',
+      adapter: ExpressAdapter,
+    }),
+
+    // 2. Registro das filas com o adaptador BullMQ
+    BullBoardModule.forFeature({
+      name: 'mail_queue',
+      adapter: BullMQAdapter,
+    }),
+    BullBoardModule.forFeature({
+      name: 'sms_queue',
+      adapter: BullMQAdapter,
+    }),
     // 👥 Domínios
     UsersModule,
     VerificationModule,

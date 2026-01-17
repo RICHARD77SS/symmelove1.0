@@ -18,6 +18,10 @@
     "generate:module": "nest g module"
   },
   "dependencies": {
+    "@bull-board/api": "^6.16.2",
+    "@bull-board/express": "^6.16.2",
+    "@bull-board/nestjs": "^6.16.2",
+    "@nestjs/bullmq": "^11.0.4",
     "@nestjs/cache-manager": "^3.1.0",
     "@nestjs/common": "^11.1.9",
     "@nestjs/config": "^4.0.2",
@@ -34,6 +38,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "argon2": "^0.44.0",
     "bcrypt": "^6.0.0",
+    "bullmq": "^5.66.5",
     "cache-manager": "^7.2.7",
     "cache-manager-redis-yet": "^5.1.5",
     "class-transformer": "^0.5.1",
@@ -41,6 +46,7 @@
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "google-auth-library": "^10.5.0",
+    "handlebars": "^4.7.8",
     "ioredis": "^5.8.2",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
@@ -51,13 +57,15 @@
     "qrcode": "^1.5.4",
     "reflect-metadata": "^0.2.2",
     "resend": "^6.7.0",
-    "speakeasy": "^2.0.0"
+    "speakeasy": "^2.0.0",
+    "twilio": "^5.11.2"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.14",
     "@types/bcrypt": "^6.0.0",
     "@types/cache-manager": "^5.0.0",
     "@types/express": "^5.0.6",
+    "@types/handlebars": "^4.1.0",
     "@types/jest": "^29.5.14",
     "@types/node": "^25.0.3",
     "@types/passport-jwt": "^4.0.1",

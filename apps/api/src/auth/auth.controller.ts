@@ -114,11 +114,6 @@ export class AuthController {
   // 4. MÉTODOS DE LOGIN ALTERNATIVOS (SMS/GOOGLE)
   // =====================================================
 
-  @Post('login/phone/request')
-  @Throttle({ default: { limit: 2, ttl: 60000 } })
-  async requestOtp(@Body() dto: RequestOtpDto) {
-    return this.authService.requestPhoneOtp(dto.phone);
-  }
 
   @Post('login/phone/verify')
   @HttpCode(HttpStatus.OK)
@@ -143,10 +138,19 @@ export class AuthController {
     return this.authService.forgotPassword(email);
   }
 
-  @Post('password/reset')
-  @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 5, ttl: 60000 } }) 
-  async resetPassword(@Body() dto: ResetPasswordDto) {
-    return this.authService.resetPassword(dto);
+  @Post('login/phone/request') // Certifique-se que o Postman bate exatamente aqui
+async RequestOtpDto(@Body() dto: any) {
+  console.log('--- ENTRANDO NO CONTROLLER ---');
+  console.log('Payload recebido:', dto);
+
+  if (!dto.phone) {
+    console.error('ERRO: Campo phone não enviado no JSON');
+    return { error: 'Campo phone é obrigatório' };
   }
+
+  const result = await this.authService.requestPhoneOtp(dto.phone);
+  console.log('Resultado do Service:', result);
+  return result;
+}
+  
 }
