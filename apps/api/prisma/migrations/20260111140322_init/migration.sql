@@ -31,7 +31,8 @@ CREATE TABLE "auth_providers" (
 
     CONSTRAINT "auth_providers_pkey" PRIMARY KEY ("id")
 );
-
+-- 1. Adicione isso junto aos outros CreateEnum no topo do arquivo
+CREATE TYPE "ProfileStatus" AS ENUM ('ACTIVE', 'DELETED');
 -- CreateTable
 CREATE TABLE "profiles" (
     "id" TEXT NOT NULL,
@@ -39,7 +40,9 @@ CREATE TABLE "profiles" (
     "core" JSONB NOT NULL,
     "attributes" JSONB NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
+-- ADICIONE ESTAS DUAS LINHAS ABAIXO:
+    "status" "ProfileStatus" NOT NULL DEFAULT 'ACTIVE',
+    "deletedAt" TIMESTAMP(3),
     CONSTRAINT "profiles_pkey" PRIMARY KEY ("id")
 );
 

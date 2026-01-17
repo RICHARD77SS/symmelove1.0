@@ -18,6 +18,7 @@ generator client {
 // - Consistência forte
 datasource db {
   provider = "postgresql"
+  
 }
 
 
@@ -111,6 +112,11 @@ model AuthProvider {
 // =====================================
 // Extremamente flexível via JSONB
 // Pode evoluir sem migrations frequentes
+enum ProfileStatus {
+  ACTIVE
+  DELETED
+}
+
 model Profile {
   id        String   @id @default(uuid())
   userId    String   @unique
@@ -126,7 +132,8 @@ model Profile {
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id])
-
+  status     ProfileStatus @default(ACTIVE)
+  deletedAt  DateTime?
   @@map("profiles")
 }
 

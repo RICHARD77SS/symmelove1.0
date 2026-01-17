@@ -12,6 +12,7 @@ import authConfigProvider from './auth/auth.config.provider';
 import { BullBoardModule } from '@bull-board/nestjs';
 import { ExpressAdapter } from '@bull-board/express';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter'; // Importação correta
+import { ProfilesModule } from './modules/profiles/profiles.module';
 
 @Module({
   imports: [
@@ -68,6 +69,7 @@ import { BullMQAdapter } from '@bull-board/api/bullMQAdapter'; // Importação c
     
     // 🔑 Autenticação
     AuthModule,
+    ProfilesModule,
   ],
 })
 export class AppModule {}
